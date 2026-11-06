@@ -22,13 +22,13 @@ MoSolid 的目标是：在多个已有 SolidWorks 自动化项目之上，做成
 | 仓库 | 审阅 SHA | 提交时间（仓库记录） | 许可证（以仓库内 LICENSE 为准） |
 |---|---|---|---|
 | `Appwomb/solidworks-automation-skill`（本仓库，底座） | `9ba848e301e996cc64d8078df13f4ccc24416339` | 2026-11-04 | MIT，版权人 “SolidWorks Automation Skill Contributors” |
-| `Appwomb/mcp-server-solidworks`（SolidPilot） | `f9546a9e11c86cd03e5cab3277805485907c77a2` | 2026-07-21 | AGPL-3.0，README 版权声明为 Çağatay Bakan，2025–2026 |
+| `Appwomb/mcp-server-solidworks`（SolidPilot） | `f9546a9e11c86cd03e5cab3277805485907c77a2` | 2026-07-21 | AGPL-3.0，README 版权声明为 Çağatay Bakan，2025–2026。该 fork 停在这一提交；实现前必须和上游默认分支重新 diff |
 | `Appwomb/SolidworksMCP-TS` | `ea5539948b816cd34571a4eda00a3a93f4bd86bb` | 2026-09-19 | MIT，Copyright (c) 2025 ESPO Corporation |
 | `Appwomb/Solidworks-MCP`（alisamsam） | `ee8f42a1a919af5e0fa8d1dcd24270c9983ce027` | 2026-03-23 | MIT，Copyright (c) 2026 Samsaam Ali Baig |
 | `Appwomb/SolidworksMCP-python` | `5451e8ebe5b09bcada9c95b6be7a1d987630ba08` | 2026-11-05 | MIT；LICENSE 写 Copyright (c) 2025 ESPO Corporation，`pyproject.toml` 作者为 Andrew Bartels |
 | `Appwomb/SolidWorks-MCP-1`（hjbaard） | `ddcefc0cfa056002ff8eb8bdb186818ad52dc2f1` | 2026-11-03 | MIT，Copyright (c) 2026 Henk Jan Baard |
 | `Appwomb/Millwright` | `0e7f9b5332b3d908fa8872eb9958803d6171fc1d` | 2026-10-02 | Apache-2.0；`AUTHORS.md` 记载创始人 Raylan LIN |
-| `Appwomb/MoAspen` | 未读到 | — | 未知。私有仓库，当前凭据返回 404 |
+| `Appwomb/MoAspen` | 审查确认 `57f9a2e` | — | Tauri 项目，仓库内没有 LICENSE。本执行环境的安装令牌打不开该文件树，差表不臆造路径。出现 LICENSE 之前禁止复制其代码 |
 
 本环境没有 Windows，也没有 SolidWorks。文档里的“真机”均指仓库中已有的测试、验收记录或作者声明，不是本次重新执行的结果。
 

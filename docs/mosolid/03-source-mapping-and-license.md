@@ -39,7 +39,7 @@
 | 破坏性操作前备份 | Millwright | 规格 | 备份失败则 R2/R3 不执行。这是我们的加严，与 Millwright 当前“失败仍继续”不同 |
 | 视觉截图 | Millwright `capture_view`；本仓库审查预览 | 规格 | 截图是附加证据，不能代替尺寸和体积 |
 | 叙述与真实工具调用不一致时纠偏 | Millwright agent loop | 规格 | 桌面端可做。MCP 客户端我们控制不了对方 UI |
-| 多模型 → 审批 → COM → 回读 → `mcp_audit.jsonl` → Tauri | MoAspen | E0 | 架构约束来自任务说明。未读源码，无文件级映射 |
+| 多模型 → 审批 → COM → 回读 → `mcp_audit.jsonl` → Tauri | MoAspen `57f9a2e` | 规格 | 审查确认是 Tauri 且没有 LICENSE。本环境未打开文件树，无文件级映射。出现 LICENSE 之前禁止复制 |
 | 任意 Python / shell / 默认执行 VBA | alisamsam、Millwright、TS、python 的生成并执行工具 | 禁止复制 | P0–P4 不注册 |
 
 ## 3.2 许可证总览
@@ -53,7 +53,7 @@
 | SolidworksMCP-python | MIT | LICENSE 与 `pyproject.toml` 作者不一致，见 3.4 | 查清前不复制源文件 |
 | SolidWorks-MCP-1 | MIT | Copyright (c) 2026 Henk Jan Baard | 可以。保留声明 |
 | Millwright | Apache-2.0 | `LICENSE` 全文；`AUTHORS.md` 写 Raylan LIN。树内未找到 `NOTICE` 文件 | 可以。遵守 3.5 |
-| MoAspen | 未知 | 未读到 | 禁止猜测为 MIT。读到 LICENSE 之前不复制、不 submodule |
+| MoAspen | `57f9a2e` 没有 LICENSE 文件 | 审查确认。本环境未打开文件树 | 出现 LICENSE 并且评审通过之前不复制、不 submodule。没有许可证时视为保留所有权利 |
 
 本设计 PR 只新增 `docs/mosolid/` 下的原创说明，没有粘贴上述仓库的源码。
 

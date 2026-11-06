@@ -85,11 +85,28 @@ P0 到 P4 的公共工具是白名单，不是“把 154 个名字并进来”�
 | 规则 | 原因 |
 |---|---|
 | 一个执行进程一条 STA 线程，队列一次跑一个闭包 | SolidWorks RCW 有线程亲和性。MTA 上轻量调用有时能返回，钣金和圆角会空返回或死锁。这是 SolidPilot 注释里的现象，hjbaard、python、Millwright 的专用线程是同一约束的独立实现 |
-| 连接只用 `GetActiveObject` 附着已经由用户打开、并且许可就绪的实例 | 不调用 `Dispatch("SldWorks.Application")` 去创建第二个实例，避免碰用户正在编辑的另一进程，也避免无许可启动 |
-| 等待超时作用在编排侧的 future 上，默认 120 秒 | 模态对话框会让 COM 调用永不返回。超时后向用户报告“可能有对话框”，不假装调用已结束。已经进入 STA 的调用无法安全杀掉 |
+| 只有一个 `SLDWORKS.exe` 时用 `GetActiveObject` 附着已经打开且许可就绪的实例。多个实例按本节后面的表处理 | 不调用 `Dispatch("SldWorks.Application")` 去创建第二个实例，也不在多实例时碰运气连接 |
+| 等待超时作用在编排进程对队列的等待上，默认 120 秒。超时是硬性通过条件 | 模态对话框会让已经进入 STA 的调用一直不返回，执行进程因此永久占住这条线程。超时后按下面的步骤处理，不能只打一条日志 |
 | STA 线程不注册事件 sink，也不跑消息泵 | hjbaard 的实现说明：非泵送 STA 上注册 sink 会丢事件。需要 PropertyManagerPage、TaskPane、长期事件时，走本仓库已有的 C# 进程内 Add-in 后端，而不是把 sink 塞进这条线程 |
 | 重入：若闭包内部再次提交 COM，检测到已在 STA 上则直接执行 | 避免队列自己等自己。Millwright 的 executor 有这个分支，行为上需要，代码另写 |
-| 执行进程崩溃后编排进程丢弃全部 RCW 假设，重新附着，并把内存中的 `state_version` 标为未知 | 未知版本不允许发变更操作 |
+| 执行进程崩溃或被超时流程结束后，编排进程丢弃全部 RCW 假设 | 内存中的 `state_version` 标为未知。未知版本不允许发变更操作 |
+
+STA 超时的硬性通过条件：
+
+1. 编排进程立即停止接收变更。尚未开始的排队变更丢弃，并写 `phase=cancelled`，原因 `sta_timeout`。
+2. 结束执行进程，让卡在 COM 里的线程随进程消失。不结束 `SLDWORKS.exe`。
+3. 启动新的执行进程并重新附着。新会话的模式是 `query_only`。
+4. `query_only` 期间变更接口返回 `EXECUTOR_QUERY_ONLY`。查询只用来读取特征树、尺寸、质量属性和活动文档身份，组成指纹。
+5. 指纹与超时前最后一条 `result=ok` 一致，或与本步 intent 中的调用前指纹一致，才按 2.7 的审计状态决定能否用同一 `operation_id` 重试。核对不一致就保持 `query_only`，运行记 `BLOCKED`，直到人把当前查询结果确认为新基线。
+6. 不向对话框发送 `WM_CLOSE`。`dialog_dismiss_count` 保持 0。
+
+多个 `SLDWORKS.exe` 时的附着规则：
+
+| 进程数 | 行为 |
+|---|---|
+| 0 | 不启动 SolidWorks。返回 `environment_missing` |
+| 1 | `GetActiveObject` 附着，并把该进程的 pid 写入会话 |
+| 大于 1 | 不调用 `GetActiveObject`，因为它不指定实例。返回 `AMBIGUOUS_INSTANCE`，列出每个 pid、可执行路径和主窗口标题。会话只有在调用方传入其中的一个 `target_pid` 后才继续。若运行时无法把 COM 指针绑到这个 pid，返回 `INSTANCE_NOT_BINDABLE`，由操作者关掉其余实例。不连接“列表里的第一个”，也不连接 `GetActiveObject` 碰巧返回的那一个 |
 
 C# PIA 与 Python `pywin32` 都可能成为这条线程上的实现。P1 选一种，用契约测试锁请求/响应，不在同一步里混用两套 RCW。本仓库能力路由里“封送失败则换 comtypes 或 C#”的规则保留为显式后端切换，每次切换都重新回读，不把前一个后端的成功当成结果。
 
@@ -169,11 +186,38 @@ P4 验收路径只使用 Q/M/A/D/X/S。层与层之间不共享“成功”定�
 4. COM 返回后追加 `phase=result`，包含回读摘要、`state_version` 和错误码。结果记录失败时，运行标为 `BLOCKED`：模型可能已经改了 CAD，审计不完整，禁止自动重试。
 5. 审批拒绝追加 `phase=denied`，不调用 COM。
 
-`intent` 记录至少包含：时间、`run_id`、`session_id`、`operation_id`、工具名、分层、审批 id（R0/R1 可为空）、文档身份、期望 `state_version`、参数摘要。秘密、令牌、完整系统提示不入库。
+同一 `operation_id` 的审计状态决定能不能再执行：
+
+| 已落盘的记录 | 再次遇到这个 id |
+|---|---|
+| 只有 `intent`，没有 `result` | 允许用同一 id 重试这一次逻辑操作。重试前先处于 `query_only`，把当前指纹和 intent 里的调用前指纹比较。指纹未变，说明 COM 没有提交，可以重试。指纹已变，说明崩溃点可能在 COM 已经生效之后，不重试，记 `BLOCKED`，错误码 `COMMIT_UNCERTAIN` |
+| `result` 且状态为 ok | 返回 `DUPLICATE`，附带已保存的 result，不再调用 COM |
+| `result` 为 fail，或记录为 `BLOCKED` | 不返回 `DUPLICATE`。按错误码处理：`invalid_argument` 不重试；`verification_failed` 不自动再写；`AUDIT_UNAVAILABLE` 在原因消失前不重试；`COMMIT_UNCERTAIN` 与 `sta_timeout` 保持 `query_only`，直到人确认基线 |
+
+`intent` 记录至少包含：时间、`run_id`、`session_id`、`operation_id`、工具名、分层、审批 id（R0/R1 可为空）、文档身份、期望 `state_version`、调用前指纹、参数摘要。秘密、令牌、完整系统提示不入库。
+
+对外可观测的同步点，用来证明 intent 早于特征创建：
+
+- fsync 成功后、COM 入队前，编排进程写出收据 `runtime/audit-ready/<operation_id>.json`，内容是审计文件路径、字节偏移、`audit_seq` 和收据时间，并再次 fsync。
+- 生产路径在收据成功后立即入队。
+- 验收构建设置 `MOSOLID_HOLD_BEFORE_COM=1` 时，收据写出后暂停入队，直到测试进程删掉 `runtime/hold/<operation_id>`。暂停期间查询仍可执行。
+- 测试在暂停点读取审计文件，断言该 `operation_id` 的 `intent` 行位于收据偏移之内，再用查询断言特征树还没有新特征。然后释放暂停。特征出现的时间必须晚于收据文件的 mtime。
 
 现有 Trace 继续当调试事件流，写失败不影响查询。它不替代 `mcp_audit.jsonl`。两套日志的职责分开：Trace 是过程，审计是关键写操作的前置条件，台账是交付文件事实。
 
-审计文件按会话滚动，权限限当前用户。磁盘满、目录不可写、fsync 失败，统一错误码 `AUDIT_UNAVAILABLE`。
+审计文件按会话滚动，放在本机固定磁盘的用户目录，权限限当前用户。
+
+`AUDIT_UNAVAILABLE` 只表示审计没有成为耐久记录，不表示“fsync 花得久”：
+
+| 情况 | 结果 |
+|---|---|
+| `FlushFileBuffers`（或等价 fsync）返回成功 | 继续执行。耗时写入 intent 的 `audit_fsync_ms`。本地 NTFS 上超过 2 秒只记指标，不失败 |
+| 调用被杀毒软件或过滤器拖住，但最终成功 | 同上。验收注入 3 秒延迟且返回成功时，不得出现 `AUDIT_UNAVAILABLE`，且 `audit_fsync_ms` 不小于 3000 |
+| 共享冲突（例如杀毒软件短暂锁文件） | 在 COM 之前最多重试 3 次，间隔 200 ms、500 ms、1000 ms。任何一次成功即继续 |
+| 磁盘满、路径不可写、fsync 返回 IO 错误，且重试仍失败 | `AUDIT_UNAVAILABLE`，不调用 COM |
+| 审计路径在网络盘、UNC 或 `GetDriveType` 为可移动/远程介质 | 等待上限 30 秒，界面提示“审计写入变慢”。上限内成功则继续。本地固定磁盘的等待上限是 5 秒。两种上限都只在调用返回错误或超过上限时才失败 |
+
+不使用几十毫秒的 fsync 超时，避免把杀毒扫描或网络盘延迟误报成审计失败。
 
 ## 2.8 审批分级
 
@@ -199,10 +243,10 @@ Millwright 的四档交互可以参考界面，默认档是上面的 R0–R4，�
 |---|---|---|
 | 参数缺单位、孔超出板、半径为负 | `invalid_argument` | 不调用 COM。审计不写 intent，因为没有写操作 |
 | 未安装、未运行、无许可 | `environment_missing` | 停止原生路径。只有任务允许开放格式时才走无头后端 |
-| 模态对话框或 STA 超时 | `user_action_required` | 报告窗口标题（若枚举成功）。不发送 `WM_CLOSE`。用户处理后再从最后一条成功的 `result` 审计继续 |
+| 模态对话框或 STA 超时 | `user_action_required` | 执行 2.3 的硬性步骤：停止接收变更、重启执行进程、重新附着、`query_only` 直到指纹核对通过。报告窗口标题（若枚举成功）。不发送 `WM_CLOSE` |
 | `state_version` 不一致 | `policy_blocked` 类的状态拒绝 | 不执行。强制重新查询。常见原因是用户在 GUI 里改了模型，或断线重连把本地版本复位 |
 | 活动文档在调用前被用户切换 | 文档身份不匹配 | 变更操作失败。身份沿用 `mcp-server/document_identity.py` 的绑定，标题相同不够 |
-| `RPC_E_DISCONNECTED` 或进程消失 | `backend_unavailable` | 停止队列。不自动新开 SolidWorks。重新附着后只允许查询，直到读到的特征树指纹与最后一条 `result` 一致，才允许继续变更。不一致则该 run 失败，避免把同一步做两次 |
+| `RPC_E_DISCONNECTED`、执行进程崩溃或进程消失 | `backend_unavailable` | 停止接收变更，重启执行进程，不新开 SolidWorks。重新附着后只允许查询。只有 intent 没有 result 时按 2.7 决定能否用同一 id 重试；已有 `result=ok` 则返回 `DUPLICATE`。指纹对不上最后一条可靠 result 时保持 `BLOCKED` |
 | 重建错误、回读超差 | `verification_failed` | 不进入完成。改尺寸的回滚只在“写完立刻回读失败”这一条路径上做，并且回滚本身也要审计 |
 | intent 审计失败 | `AUDIT_UNAVAILABLE` | 不调用 COM |
 | result 审计失败 | `BLOCKED` | 不自动重试 |
